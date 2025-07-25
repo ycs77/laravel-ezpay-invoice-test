@@ -264,16 +264,43 @@ Route::prefix('/invoice')->group(function () use ($merchantID, $merchantHashKey,
     });
 
     // 1-5. 發票查詢
-    Route::get('/search/{invoiceNumber}/{randomNum}', function (string $invoiceNumber, string $randomNum) use ($merchantID, $merchantHashKey, $merchantHashIV, $companyID, $companyHashKey, $companyHashIV, $baseUrl) {
+    Route::get('/search/invoice/{invoiceNumber}/{randomNum}', function (string $invoiceNumber, string $randomNum) use ($merchantID, $merchantHashKey, $merchantHashIV, $companyID, $companyHashKey, $companyHashIV, $baseUrl) {
         $postData = [
             'RespondType' => 'JSON',
             'Version' => '1.3',
             'TimeStamp' => time(),
             'SearchType' => '0',
             'MerchantOrderNo' => '',
-            'TotalAmt' => '1000',
+            'TotalAmt' => '',
             'InvoiceNumber' => $invoiceNumber,
             'RandomNum' => $randomNum,
+        ];
+
+        $postDataStr = http_build_query($postData);
+        $encryptedPostData = trim(bin2hex(openssl_encrypt(addpadding($postDataStr), 'AES-256-CBC', $merchantHashKey, OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $merchantHashIV)));
+        $transactionData = [
+            'MerchantID_' => $merchantID,
+            'PostData_' => $encryptedPostData,
+        ];
+
+        $response = Http::asForm()
+            ->withUserAgent('ezPay')
+            ->post($baseUrl.'/Api/invoice_search', $transactionData);
+
+        checkCode($response->json(), $merchantHashKey, $merchantHashIV);
+
+        return response()->json($response->json());
+    });
+    Route::get('/search/order/{merchantOrderNo}/{totalAmt}', function (string $merchantOrderNo, string $totalAmt) use ($merchantID, $merchantHashKey, $merchantHashIV, $companyID, $companyHashKey, $companyHashIV, $baseUrl) {
+        $postData = [
+            'RespondType' => 'JSON',
+            'Version' => '1.3',
+            'TimeStamp' => time(),
+            'SearchType' => '1',
+            'MerchantOrderNo' => $merchantOrderNo,
+            'TotalAmt' => $totalAmt,
+            'InvoiceNumber' => '',
+            'RandomNum' => '',
         ];
 
         $postDataStr = http_build_query($postData);
@@ -298,7 +325,7 @@ Route::prefix('/invoice')->group(function () use ($merchantID, $merchantHashKey,
             'TimeStamp' => time(),
             'SearchType' => '0',
             'MerchantOrderNo' => '',
-            'TotalAmt' => '1000',
+            'TotalAmt' => '',
             'InvoiceNumber' => $invoiceNumber,
             'RandomNum' => $randomNum,
             'DisplayFlag' => '1',
