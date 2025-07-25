@@ -236,6 +236,38 @@ Route::prefix('/invoice')->group(function () use ($merchantID, $merchantHashKey,
     // 觸發取消折讓
 
     // 1-3-2. 立即確認折讓
+    Route::get('/allowances/instant/{invoiceNumber}/{merchantOrderNo}', function (string $invoiceNumber, string $merchantOrderNo) use ($merchantID, $merchantHashKey, $merchantHashIV, $companyID, $companyHashKey, $companyHashIV, $baseUrl) {
+        $postData = [
+            'RespondType' => 'JSON',
+            'Version' => '1.3',
+            'TimeStamp' => time(),
+            'InvoiceNo' => $invoiceNumber,
+            'MerchantOrderNo' => $merchantOrderNo,
+            'ItemName' => '測試商品',
+            'ItemCount' => '1',
+            'ItemUnit' => '個',
+            'ItemPrice' => '800',
+            'ItemAmt' => '800',
+            'ItemTaxAmt' => '0',
+            'TotalAmt' => '800',
+            'Status' => '1',
+        ];
+
+        $postDataStr = http_build_query($postData);
+        $encryptedPostData = trim(bin2hex(openssl_encrypt(addpadding($postDataStr), 'AES-256-CBC', $merchantHashKey, OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $merchantHashIV)));
+        $transactionData = [
+            'MerchantID_' => $merchantID,
+            'PostData_' => $encryptedPostData,
+        ];
+
+        $response = Http::asForm()
+            ->withUserAgent('ezPay')
+            ->post($baseUrl.'/Api/allowance_issue', $transactionData);
+
+        checkCode($response->json(), $merchantHashKey, $merchantHashIV);
+
+        return response()->json($response->json());
+    });
 
     // 1-4. 作廢折讓－作廢已確認折讓
     Route::get('/allowances/void/{allowanceNo}', function (string $allowanceNo) use ($merchantID, $merchantHashKey, $merchantHashIV, $companyID, $companyHashKey, $companyHashIV, $baseUrl) {
