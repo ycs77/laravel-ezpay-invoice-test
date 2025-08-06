@@ -379,5 +379,31 @@ Route::prefix('/invoice')->group(function () use ($merchantID, $merchantHashKey,
 </html>
 HTML)->header('Content-Type', 'text/html');
     });
+    Route::get('/search/url/{merchantOrderNo}/{totalAmt}', function (string $merchantOrderNo, string $totalAmt) use ($merchantID, $merchantHashKey, $merchantHashIV, $companyID, $companyHashKey, $companyHashIV, $baseUrl) {
+        $postData = [
+            'RespondType' => 'JSON',
+            'Version' => '1.3',
+            'TimeStamp' => time(),
+            'SearchType' => '1',
+            'MerchantOrderNo' => $merchantOrderNo,
+            'TotalAmt' => $totalAmt,
+            'InvoiceNumber' => '',
+            'RandomNum' => '',
+            'DisplayFlag' => '2',
+        ];
+
+        $postDataStr = http_build_query($postData);
+        $encryptedPostData = trim(bin2hex(openssl_encrypt(addpadding($postDataStr), 'AES-256-CBC', $merchantHashKey, OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $merchantHashIV)));
+        $transactionData = [
+            'MerchantID_' => $merchantID,
+            'PostData_' => $encryptedPostData,
+        ];
+
+        $response = Http::asForm()
+            ->withUserAgent('ezPay')
+            ->post($baseUrl.'/Api/invoice_search', $transactionData);
+
+        return response()->json($response->json());
+    });
 
 });
