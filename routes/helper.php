@@ -10,7 +10,7 @@ function addpadding($string, $blocksize = 32)
 
 function removepadding($string)
 {
-    $pad = ord($string[strlen($string) - 1]);
+    $pad = ord(substr($string, -1));
     if ($pad < 1 || $pad > 32) {
         return $string; // No padding
     }
