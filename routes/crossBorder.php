@@ -1,246 +1,115 @@
 <?php
 
-use Illuminate\Support\Facades\Http;
+use Agriweather\EzPayInvoice\Enums\Invoice\CurrencyType;
+use Agriweather\EzPayInvoice\Facades\EzPayInvoice;
 use Illuminate\Support\Facades\Route;
-
-$merchantID = env('EZPAY_INVOICE_MERCHANT_ID');
-$merchantHashKey = env('EZPAY_INVOICE_MERCHANT_HASH_KEY');
-$merchantHashIV = env('EZPAY_INVOICE_MERCHANT_HASH_IV');
-$companyID = env('EZPAY_INVOICE_COMPANY_ID');
-$companyHashKey = env('EZPAY_INVOICE_COMPANY_HASH_KEY');
-$companyHashIV = env('EZPAY_INVOICE_COMPANY_HASH_IV');
-$baseUrl = 'https://cinv.ezpay.com.tw';
 
 // 1. 電子發票
 
-Route::prefix('/crossBorder')->group(function () use ($merchantID, $merchantHashKey, $merchantHashIV, $companyID, $companyHashKey, $companyHashIV, $baseUrl) {
+Route::prefix('/crossBorder')->group(function () {
 
     // 1-1. 開立發票
     // 1-1-1. 即時開立發票
-    Route::get('/instant', function () use ($merchantID, $merchantHashKey, $merchantHashIV, $companyID, $companyHashKey, $companyHashIV, $baseUrl) {
-        $postData = [
-            'RespondType' => 'JSON',
-            'Version' => '1.0',
-            'TimeStamp' => time(),
-            'MerchantOrderNo' => 'CBOrder'.time(),
-            'Status' => '1',
-            'BuyerName' => 'John Doe',
-            'BuyerEmail' => 'customer@example.com',
-            'Amt' => '100.00',
-            'TaxAmt' => '5.50',
-            'TotalAmt' => '105.50',
-            'ItemName' => '國際商品',
-            'ItemCount' => '1',
-            'ItemUnit' => 'EA',
-            'ItemPrice' => '105.50',
-            'ItemAmt' => '105.50',
-            'Currency' => 'USD',
-            'OriginalCurrencyAmount' => '100.00',
-            'ExchangeRate' => '30.5',
-        ];
+    Route::get('/instant', function () {
+        $result = EzPayInvoice::crossBorder()
+            ->invoice()
+            ->create()
+            ->withOrder('CBOrder'.time()) // 訂單編號
+            ->withCustomer('John Doe') // 買受人姓名
+            ->withEmail('customer@example.com') // 買受人電子信箱
+            ->withCurrency(CurrencyType::USD) // 幣別：USD 美元
+            ->withItem('國際商品', quantity: 1, unit: 'EA', price: 105.5, amount: 105.5) // 商品名稱、數量、單位、單價和金額
+            ->withAmount(100.0, 5.5, 105.5) // 未稅銷售額、稅額、含稅銷售額
+            ->withOriginalCurrencyAmount(100.0) // 營業人備註之原幣金額
+            ->withExchangeRate(30.5) // 營業人備註之匯率
+            ->issue();
 
-        $postDataStr = http_build_query($postData);
-        $encryptedPostData = trim(bin2hex(openssl_encrypt(addpadding($postDataStr), 'AES-256-CBC', $merchantHashKey, OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $merchantHashIV)));
-        $transactionData = [
-            'MerchantID_' => $merchantID,
-            'PostData_' => $encryptedPostData,
-        ];
-
-        $response = Http::asForm()
-            ->withUserAgent('ezPay')
-            ->post($baseUrl.'/Api/crossBorderInvoiceIssue', $transactionData);
-
-        checkCode($response->json(), $merchantHashKey, $merchantHashIV);
-
-        return response()->json($response->json());
+        return $result;
     });
 
     // 1-3. 開立折讓
     // 1-3-1. 不立即確認折讓
-    Route::get('/allowances/pending/{invoiceNumber}/{merchantOrderNo}', function (string $invoiceNumber, string $merchantOrderNo) use ($merchantID, $merchantHashKey, $merchantHashIV, $companyID, $companyHashKey, $companyHashIV, $baseUrl) {
-        $postData = [
-            'RespondType' => 'JSON',
-            'Version' => '1.0',
-            'TimeStamp' => time(),
-            'InvoiceNo' => $invoiceNumber,
-            'MerchantOrderNo' => $merchantOrderNo,
-            'ItemName' => '國際商品',
-            'ItemCount' => '1',
-            'ItemUnit' => 'EA',
-            'ItemPrice' => '105.50',
-            'ItemAmt' => '105.50',
-            'ItemTaxAmt' => '0',
-            'TotalAmt' => '105.50',
-            'Status' => '0',
-        ];
+    Route::get('/allowances/pending/{invoiceNumber}/{merchantOrderNo}', function (string $invoiceNumber, string $merchantOrderNo) {
+        $result = EzPayInvoice::crossBorder()
+            ->allowance()
+            ->create()
+            ->withInvoice($invoiceNumber)
+            ->withOrder($merchantOrderNo)
+            ->withItem('國際商品', quantity: 1, unit: '個', price: 105.5, amount: 105.5)
+            ->withTotalAmount(105.5)
+            ->issuePendingConfirmation();
 
-        $postDataStr = http_build_query($postData);
-        $encryptedPostData = trim(bin2hex(openssl_encrypt(addpadding($postDataStr), 'AES-256-CBC', $merchantHashKey, OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $merchantHashIV)));
-        $transactionData = [
-            'MerchantID_' => $merchantID,
-            'PostData_' => $encryptedPostData,
-        ];
-
-        $response = Http::asForm()
-            ->withUserAgent('ezPay')
-            ->post($baseUrl.'/Api/crossBorderAllowanceIssue', $transactionData);
-
-        checkCode($response->json(), $merchantHashKey, $merchantHashIV);
-
-        return response()->json($response->json());
+        return $result;
     });
 
     // 觸發確認折讓
-    Route::get('/allowances/confirm/{allowanceNo}/{merchantOrderNo}', function (string $allowanceNo, string $merchantOrderNo) use ($merchantID, $merchantHashKey, $merchantHashIV, $companyID, $companyHashKey, $companyHashIV, $baseUrl) {
-        $postData = [
-            'RespondType' => 'JSON',
-            'Version' => '1.0',
-            'TimeStamp' => time(),
-            'AllowanceStatus' => 'C',
-            'AllowanceNo' => $allowanceNo,
-            'MerchantOrderNo' => $merchantOrderNo,
-            'TotalAmt' => '800',
-        ];
+    Route::get('/allowances/confirm/{allowanceNo}/{merchantOrderNo}', function (string $allowanceNo, string $merchantOrderNo) {
+        $result = EzPayInvoice::crossBorder()
+            ->allowance()
+            ->pending()
+            ->withAllowance($allowanceNo)
+            ->withOrder($merchantOrderNo)
+            ->withTotalAmount(105.5)
+            ->confirm();
 
-        $postDataStr = http_build_query($postData);
-        $encryptedPostData = trim(bin2hex(openssl_encrypt(addpadding($postDataStr), 'AES-256-CBC', $merchantHashKey, OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $merchantHashIV)));
-        $transactionData = [
-            'MerchantID_' => $merchantID,
-            'PostData_' => $encryptedPostData,
-        ];
+        return $result;
+    });
 
-        $response = Http::asForm()
-            ->withUserAgent('ezPay')
-            ->post($baseUrl.'/Api/allowance_touch_issue', $transactionData);
+    // 觸發取消折讓
+    Route::get('/allowances/cancel/{allowanceNo}/{merchantOrderNo}', function (string $allowanceNo, string $merchantOrderNo) {
+        $result = EzPayInvoice::crossBorder()
+            ->allowance()
+            ->pending()
+            ->withAllowance($allowanceNo)
+            ->withOrder($merchantOrderNo)
+            ->withTotalAmount(105.5)
+            ->cancel();
 
-        checkCode($response->json(), $merchantHashKey, $merchantHashIV);
-
-        return response()->json($response->json());
+        return $result;
     });
 
     // 1-3-2. 立即確認折讓
-    Route::get('/allowances/instant/{invoiceNumber}/{merchantOrderNo}', function (string $invoiceNumber, string $merchantOrderNo) use ($merchantID, $merchantHashKey, $merchantHashIV, $companyID, $companyHashKey, $companyHashIV, $baseUrl) {
-        $postData = [
-            'RespondType' => 'JSON',
-            'Version' => '1.3',
-            'TimeStamp' => time(),
-            'InvoiceNo' => $invoiceNumber,
-            'MerchantOrderNo' => $merchantOrderNo,
-            'ItemName' => '測試商品',
-            'ItemCount' => '1',
-            'ItemUnit' => '個',
-            'ItemPrice' => '800',
-            'ItemAmt' => '800',
-            'ItemTaxAmt' => '0',
-            'TotalAmt' => '800',
-            'Status' => '1',
-        ];
+    Route::get('/allowances/instant/{invoiceNumber}/{merchantOrderNo}', function (string $invoiceNumber, string $merchantOrderNo) {
+        $result = EzPayInvoice::crossBorder()
+            ->allowance()
+            ->create()
+            ->withInvoice($invoiceNumber)
+            ->withOrder($merchantOrderNo)
+            ->withItem('國際商品', quantity: 1, unit: '個', price: 105.5, amount: 105.5)
+            ->withTotalAmount(105.5)
+            ->issue();
 
-        $postDataStr = http_build_query($postData);
-        $encryptedPostData = trim(bin2hex(openssl_encrypt(addpadding($postDataStr), 'AES-256-CBC', $merchantHashKey, OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $merchantHashIV)));
-        $transactionData = [
-            'MerchantID_' => $merchantID,
-            'PostData_' => $encryptedPostData,
-        ];
-
-        $response = Http::asForm()
-            ->withUserAgent('ezPay')
-            ->post($baseUrl.'/Api/allowance_issue', $transactionData);
-
-        checkCode($response->json(), $merchantHashKey, $merchantHashIV);
-
-        return response()->json($response->json());
+        return $result;
     });
 
     // 1-5. 發票查詢
-    Route::get('/search/invoice/{invoiceNumber}/{randomNum}', function (string $invoiceNumber, string $randomNum) use ($merchantID, $merchantHashKey, $merchantHashIV, $companyID, $companyHashKey, $companyHashIV, $baseUrl) {
-        $postData = [
-            'RespondType' => 'JSON',
-            'Version' => '1.0',
-            'TimeStamp' => time(),
-            'SearchType' => '0',
-            'MerchantOrderNo' => '',
-            'TotalAmt' => '',
-            'InvoiceNumber' => $invoiceNumber,
-            'RandomNum' => $randomNum,
-        ];
+    Route::get('/search/invoice/{invoiceNumber}/{randomNum}', function (string $invoiceNumber, string $randomNum) {
+        $result = EzPayInvoice::crossBorder()
+            ->invoice()
+            ->query()
+            ->withInvoice($invoiceNumber)
+            ->withRandomNumber($randomNum)
+            ->get();
 
-        $postDataStr = http_build_query($postData);
-        $encryptedPostData = trim(bin2hex(openssl_encrypt(addpadding($postDataStr), 'AES-256-CBC', $merchantHashKey, OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $merchantHashIV)));
-        $transactionData = [
-            'MerchantID_' => $merchantID,
-            'PostData_' => $encryptedPostData,
-        ];
-
-        $response = Http::asForm()
-            ->withUserAgent('ezPay')
-            ->post($baseUrl.'/Api/crossBorderInvoiceSearch', $transactionData);
-
-        checkCode($response->json(), $merchantHashKey, $merchantHashIV);
-
-        return response()->json($response->json());
+        return $result;
     });
-    Route::get('/search/order/{merchantOrderNo}/{totalAmt}', function (string $merchantOrderNo, string $totalAmt) use ($merchantID, $merchantHashKey, $merchantHashIV, $companyID, $companyHashKey, $companyHashIV, $baseUrl) {
-        $postData = [
-            'RespondType' => 'JSON',
-            'Version' => '1.0',
-            'TimeStamp' => time(),
-            'SearchType' => '1',
-            'MerchantOrderNo' => $merchantOrderNo,
-            'TotalAmt' => $totalAmt,
-            'InvoiceNumber' => '',
-            'RandomNum' => '',
-        ];
+    Route::get('/search/order/{merchantOrderNo}/{totalAmt}', function (string $merchantOrderNo, string $totalAmt) {
+        $result = EzPayInvoice::crossBorder()
+            ->invoice()
+            ->query()
+            ->withOrder($merchantOrderNo)
+            ->withTotalAmount((int) $totalAmt)
+            ->get();
 
-        $postDataStr = http_build_query($postData);
-        $encryptedPostData = trim(bin2hex(openssl_encrypt(addpadding($postDataStr), 'AES-256-CBC', $merchantHashKey, OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $merchantHashIV)));
-        $transactionData = [
-            'MerchantID_' => $merchantID,
-            'PostData_' => $encryptedPostData,
-        ];
-
-        $response = Http::asForm()
-            ->withUserAgent('ezPay')
-            ->post($baseUrl.'/Api/crossBorderInvoiceSearch', $transactionData);
-
-        checkCode($response->json(), $merchantHashKey, $merchantHashIV);
-
-        return response()->json($response->json());
+        return $result;
     });
-    Route::get('/search/html/{invoiceNumber}/{randomNum}', function (string $invoiceNumber, string $randomNum) use ($merchantID, $merchantHashKey, $merchantHashIV, $companyID, $companyHashKey, $companyHashIV, $baseUrl) {
-        $postData = [
-            'RespondType' => 'JSON',
-            'Version' => '1.0',
-            'TimeStamp' => time(),
-            'SearchType' => '0',
-            'MerchantOrderNo' => '',
-            'TotalAmt' => '',
-            'InvoiceNumber' => $invoiceNumber,
-            'RandomNum' => $randomNum,
-            'DisplayFlag' => '1',
-        ];
-
-        $postDataStr = http_build_query($postData);
-        $encryptedPostData = trim(bin2hex(openssl_encrypt(addpadding($postDataStr), 'AES-256-CBC', $merchantHashKey, OPENSSL_RAW_DATA | OPENSSL_ZERO_PADDING, $merchantHashIV)));
-
-        return response(<<<HTML
-<!DOCTYPE html>
-<html>
-    <head>
-        <meta charset="utf-8" />
-    </head>
-
-    <body>
-        <form id="order-form" action="{$baseUrl}/Api/crossBorderInvoiceSearch" method="post">
-            <input type="hidden" name="MerchantID_" value="{$merchantID}">
-            <input type="hidden" name="PostData_" value="{$encryptedPostData}">
-            <input type="submit">
-        </form>
-
-        <script>document.getElementById("order-form").submit();</script>
-    </body>
-</html>
-HTML)->header('Content-Type', 'text/html');
+    Route::get('/search/html/{invoiceNumber}/{randomNum}', function (string $invoiceNumber, string $randomNum) {
+        return EzPayInvoice::crossBorder()
+            ->invoice()
+            ->query()
+            ->withInvoice($invoiceNumber)
+            ->withRandomNumber($randomNum)
+            ->redirectToEzPay();
     });
 
 });
